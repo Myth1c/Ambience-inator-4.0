@@ -427,12 +427,8 @@ async def load_ambience():
 def start_gui():
     global root
     root = tk.Tk()
-    root.title("Ambience-inator 4.0")
-
-    root.grid_rowconfigure(0, weight=0)  # playlist row
-    root.grid_rowconfigure(1, weight=1)  # spacer row (takes up space)
-    root.grid_rowconfigure(2, weight=0)  # controls row
-    root.grid_columnconfigure(0, weight=1)
+    root.title("Ambience-inator 4.1")
+    root.resizable(False, False)
 
     root.config(bg="gray25")
 #region Playlist Selection
