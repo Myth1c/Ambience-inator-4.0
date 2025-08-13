@@ -25,8 +25,8 @@
    ```json
    {
         "bot_token" : "YOUR_BOT_TOKEN",
-        "channel_id" : YOUR_TEXT_CHANNEL_ID,
-        "vchannel_id" : YOUR_VOICE_CHANNEL_ID
+        "channel_id" : "YOUR_TEXT_CHANNEL_ID",
+        "vchannel_id" : "YOUR_VOICE_CHANNEL_ID"
    }
 3. Replace the `"YOUR_BOT_TOKEN"` with your bot token (Keep the quotes). If you aren't sure how to get IDs refer to the "How to get channel IDs" section below.
 4. Replace `YOUR_TEXT_CHANNEL_ID` with the ID of the text channel where you wish the bot to display the Queue message (Make sure the channel ID isn't in quotes)
