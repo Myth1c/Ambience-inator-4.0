@@ -539,12 +539,14 @@ def start_gui():
     voiceChat_button.config(command=lambda: asyncio.run_coroutine_threadsafe(join_vc(bot, VOICE_ID, voiceChat_button), loop))
 
 
+    editAmb_btn = tk.Button(control_frame, text="Edit Ambience", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(open_edit_popup(), loop))
+    editAmb_btn.grid(row = 1, column = 0, padx = 5, pady=2, stick = "ew")
 
-    editMode_btn = tk.Button(control_frame, text="Edit Mode", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(open_edit_popup(), loop))
-    editMode_btn.grid(row = 3, column = 0, padx = 5, pady=2, stick = "ew")
+    editMusic_btn = tk.Button(control_frame, text="Edit Playlists", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(open_edit_popup(), loop))
+    editMusic_btn.grid(row = 2, column = 0, padx = 5, pady=2, stick = "ew")
 
     stop_btn = tk.Button(control_frame, text="Shutdown", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(shutdown(), loop))
-    stop_btn.grid(row = 3, column = 2, padx = 5, pady=2, stick = "ew")
+    stop_btn.grid(row = 2, column = 2, padx = 5, pady=2, stick = "ew")
 #endregion
     root.mainloop()
 
