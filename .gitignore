@@ -1,0 +1,3 @@
+# Ignore bot config and playlists
+config.json
+playlists.json
