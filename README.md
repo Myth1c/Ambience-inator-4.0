@@ -57,3 +57,10 @@
 3. Check "Developer Mode" box
 4. Right click channel you want the ID of and click "Copy Channel ID"
 5. If you don't see that, try restarting discord first
+
+
+# Dependencies
+- discord.py (pip)
+- yt-dlp (pip)
+- FFmpeg (system install)
+- tkinter (bundled with Python, but may need python3-tk on Linux)
