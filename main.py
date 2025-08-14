@@ -86,7 +86,15 @@ edit_Mode = {
     "url_label" : None,
     "url_entry" : None,
     "update_btn" : None,
-    "playlist_dictionary" : {}
+    "playlist_dictionary" : {},
+
+    "edited_ambience_list" : {},
+    "ambiance_dictionary" : {},
+    "selected_ambience" : {},
+    "selected_ambience_btn" : None,
+    "previous_ambience_btn" : None,
+    "add_rmv_ambi_btn" : None,
+    "change_ambi_btn" : None
 }
 
 
@@ -243,6 +251,9 @@ def load_ambience_dictionary():
                 json.dump({}, f)
         return {}
 
+def save_ambience_dictionary(ambience_list : dict = {}):
+    with open(AMBIENCE_DICTIONARY, 'w') as f:
+        json.dump(ambience_list, f, indent=4)
 
 #endregion
 
@@ -529,14 +540,12 @@ def start_gui():
     controls_label.grid(row=0, column=0, columnspan=4, pady=(0, 10))  # span all columns with some bottom padding
     controls_label.config(bg="gray25", fg="white")
 
+    editAmb_btn = tk.Button(control_frame, text="Edit Ambience", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(open_ambience_popup(), loop))
+    editAmb_btn.grid(row = 1, column = 0, padx = 5, pady=2, stick = "ew")
 
     voiceChat_button = tk.Button(control_frame, text="Join VC", width=15, height = 1, bg="firebrick1", fg="white")
     voiceChat_button.grid(row = 1, column = 1, padx = 5, pady=2, stick = "ew")
     voiceChat_button.config(command=lambda: asyncio.run_coroutine_threadsafe(join_vc(bot, VOICE_ID, voiceChat_button), loop))
-
-
-    editAmb_btn = tk.Button(control_frame, text="Edit Ambience", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(open_edit_popup(), loop))
-    editAmb_btn.grid(row = 1, column = 0, padx = 5, pady=2, stick = "ew")
 
     editMusic_btn = tk.Button(control_frame, text="Edit Playlists", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(open_edit_popup(), loop))
     editMusic_btn.grid(row = 2, column = 0, padx = 5, pady=2, stick = "ew")
@@ -899,8 +908,6 @@ async def open_edit_popup():
                 continue
             save_playlist(name, edited_Playlist)
 
-            
-
 
     bottom_controls_frame = tk.Frame(popup)
     bottom_controls_frame.grid(row=2, column=0, columnspan=2, pady=10, sticky="ew")
@@ -945,13 +952,11 @@ async def open_edit_popup():
 
 def clear_playlist_buttons():
     for widget in playlists_frame.winfo_children():
-            widget.destroy()
+        widget.destroy()
 
     create_playlist_buttons(playlists_frame)
 
-
 def create_ambience_buttons(parent):
-    print("Create ambience buttons!")
     ambience = load_ambience_dictionary()
     col = 0
     row = 1
@@ -966,24 +971,24 @@ def create_ambience_buttons(parent):
 
     max_per_row = 6
 
-    for name in ambience:
+    for url in ambience:
         btn = tk.Button(
             parent,
-            text = name,
+            text = ambience[url],
             width = btn_width,
             height = btn_height,
             bg = "light steel blue"
         )
         btn.grid(row = row, column = col, padx = 5, pady = 5, sticky = "ew", columnspan=1)
 
-        btn.config(command = partial(handle_ambience_click, name, ambience[name], btn))
+        btn.config(command = partial(handle_ambience_click, url, ambience[url], btn))
 
         col += 1
         if col >= max_per_row:
             col = 0
             row += 1
 
-def handle_ambience_click(name, url, button):
+def handle_ambience_click(url, name, button):
     ambience_Info["ambience_name"] = name
     ambience_Info["current_url"] = url
 
@@ -992,20 +997,222 @@ def handle_ambience_click(name, url, button):
         print("Wasn't in a VC")
         return
 
-    print(f"Button {name} clicked! Attempting to start playback of {url}")
 
     if bot_Status["is_ambience_playing"] is False:
         asyncio.run_coroutine_threadsafe(start_ambience(), loop)
-        print("No ambience was playing, starting playback!")
 
 
     elif bot_Status["is_ambience_playing"] is True:
         audioMixer.stop_ambience()
         bot_Status["is_ambience_playing"] = False
         asyncio.run_coroutine_threadsafe(start_ambience(), loop)
-        print("Ambience was playing, loading new playlist!")
+
+async def open_ambience_popup():
+    popup = tk.Toplevel(bg="gray25")
+    popup.title("Edit Ambience Options")
+    popup.geometry("800x600")
+    popup.resizable(False, False)
+    popup.grab_set()
+
+    popup.grid_rowconfigure(0, weight=1)
+    popup.grid_columnconfigure(0, weight=1)
+    popup.grid_columnconfigure(1, weight=1)
+
+    def close_edit_mode():
+        edit_Mode["add_rmv_ambi_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["ambiance_dictionary"] = {}
+        edit_Mode["edited_ambience_list"] = {}
+        edit_Mode["selected_ambience"] = {}
+
+        clear_ambience_buttons()
+        popup.destroy()
+
+    def clear_edited_ambience():
+        for widget in ambi_buttons_frame.winfo_children():
+            widget.destroy()
+    
+    def show_ambience_options():
+
+        clear_edited_ambience()
+        if not edit_Mode["ambiance_dictionary"]:
+            label = tk.Label(ambi_buttons_frame, text="(No ambience added yet)", fg="gray")
+            label.pack(pady=10)
+            return
+        
+        for i, (url, title) in enumerate(edit_Mode["ambiance_dictionary"].items()):
+            text = f"{i}. {title}"
+            btn = tk.Button(ambi_buttons_frame, text=text, anchor="w", padx=5, bg = "light steel blue")
+            btn.config(command=lambda u=url, t=title, b=btn: on_ambi_button_click(u, t, b))
+            btn.pack(fill="x", pady=1)
+
+    def on_ambi_button_click(url, title, btn):
+
+        if edit_Mode["selected_ambience"] == {url : title}:
+            edit_Mode["selected_ambience"] = None
+            title_entry.delete(0, tk.END)
+            url_entry.delete(0, tk.END)
+            edit_Mode["selected_ambience_btn"].config(bg = "light steel blue")
+            edit_Mode["selected_ambience_btn"] = None
+            edit_Mode["previous_ambience_btn"] = None
+            edit_Mode["add_rmv_ambi_btn"].config(text="Add")
+            edit_Mode["change_ambi_btn"].grid_forget()
+            return
+        
+        edit_Mode["selected_ambience"] = {url : title}
+        title_entry.delete(0, tk.END)
+        title_entry.insert(0, title)
+        url_entry.delete(0, tk.END)
+        url_entry.insert(0, url)
 
 
+        edit_Mode["change_ambi_btn"].grid(row=1, column=2, rowspan=1, padx=10, pady=2, sticky="ns")
+
+        if edit_Mode["selected_ambience_btn"]:
+            edit_Mode["previous_ambience_btn"] = edit_Mode["selected_ambience_btn"]
+
+        edit_Mode["selected_ambience_btn"] = btn
+
+        edit_Mode["selected_ambience_btn"].config(bg = "slate blue")
+
+        if edit_Mode["previous_ambience_btn"]:
+            edit_Mode["previous_ambience_btn"].config(bg = "light steel blue")
+
+        edit_Mode["add_rmv_ambi_btn"].config(text="Remove")
+
+    def modify_dictionary():
+
+        newTitle = title_entry.get()
+        newURL = url_entry.get()
+
+        if edit_Mode["selected_ambience"]:
+            edit_Mode["ambiance_dictionary"].pop(next(iter(edit_Mode["selected_ambience"])))
+            edit_Mode["selected_ambience_btn"].config(bg = "light steel blue")
+            edit_Mode["selected_ambience_btn"] = None
+        else:
+            if newTitle == "":
+                # Get the title of the video from the URL
+                with YoutubeDL(YDL_OPTS) as ydl:
+                    info = ydl.extract_info(newURL, download=False)
+                    newTitle = info.get('title', None)
+            edit_Mode["ambiance_dictionary"][newURL] = newTitle
+
+
+        title_entry.delete(0, tk.END)
+        url_entry.delete(0, tk.END)
+
+        edit_Mode["selected_ambience"] = None
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+        edit_Mode["add_rmv_ambi_btn"].config(text="Add")
+
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+
+        show_ambience_options()
+
+    def change_selection():
+
+        if not edit_Mode["selected_ambience"]:
+            return
+        
+        newTitle = title_entry.get()
+        newURL = url_entry.get()
+
+        edit_Mode["ambiance_dictionary"].pop(next(iter(edit_Mode["selected_ambience"])))
+        edit_Mode["ambiance_dictionary"][newURL] = newTitle
+
+
+
+        title_entry.delete(0, tk.END)
+        url_entry.delete(0, tk.END)
+
+        edit_Mode["selected_ambience"] = None
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+        edit_Mode["add_rmv_ambi_btn"].config(text="Add")
+
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+
+        show_ambience_options()
+
+
+    def save_ambience_changes():
+        save_ambience_dictionary(edit_Mode["ambiance_dictionary"])
+
+
+    edit_Mode["ambiance_dictionary"] = load_ambience_dictionary()
+
+    ambi_container = tk.Frame(popup, bd=2, relief="sunken")
+    ambi_container.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
+    
+    
+    ambi_container.grid_rowconfigure(0, weight=1)
+    ambi_container.grid_columnconfigure(0, weight=1)
+
+
+    ambi_canvas = tk.Canvas(ambi_container)
+    ambi_scrollbar = tk.Scrollbar(ambi_container, orient="vertical", command=ambi_canvas.yview)
+    ambi_canvas.config(yscrollcommand=ambi_scrollbar.set)
+
+    ambi_canvas.grid(row=0, column=0, sticky="nsew")
+    ambi_scrollbar.grid(row=0, column=1, sticky="ns")
+
+    ambi_buttons_frame = tk.Frame(ambi_canvas)
+    ambi_canvas.create_window((0, 0), window=ambi_buttons_frame, anchor="nw")
+
+    def on_ambi_frame_configure(event):
+        ambi_canvas.configure(scrollregion=ambi_canvas.bbox("all"))
+
+    ambi_buttons_frame.bind("<Configure>", on_ambi_frame_configure)
+
+    
+
+    bottom_controls_frame = tk.Frame(popup)
+    bottom_controls_frame.grid(row=2, column=0, columnspan=4, pady=10, sticky="ew")
+    bottom_controls_frame.grid_columnconfigure(0, weight=1)
+    bottom_controls_frame.grid_columnconfigure(1, weight=1)
+    bottom_controls_frame.grid_columnconfigure(2, weight=0)
+    bottom_controls_frame.grid_columnconfigure(3, weight=0)
+
+    # Title Entry
+    title_label = tk.Label(bottom_controls_frame, text="Name:")
+    title_label.grid(row=0, column=0, sticky="e", padx=5, pady=2)
+    title_entry = tk.Entry(bottom_controls_frame, width=40)
+    title_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
+
+    # URL Entry
+    url_label = tk.Label(bottom_controls_frame, text="URL:")
+    url_label.grid(row=1, column=0, sticky="e", padx=5, pady=2)
+    url_entry = tk.Entry(bottom_controls_frame, width=40)
+    url_entry.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
+
+    # Update Button
+    update_btn = tk.Button(bottom_controls_frame, text="Add Ambience", width=10, command=lambda: modify_dictionary())
+    update_btn.grid(row=0, column=2, rowspan=1, padx=10, pady=2, sticky="ns")
+    edit_Mode["add_rmv_ambi_btn"] = update_btn
+
+    # Change Button
+    change_btn = tk.Button(bottom_controls_frame, text="Change Info", width=10, command=lambda: change_selection())
+    edit_Mode["change_ambi_btn"] = change_btn
+
+    # Save Button
+    save_btn = tk.Button(bottom_controls_frame, text="Save", width=5, command=lambda: save_ambience_changes())
+    save_btn.grid(row=0, column=3, rowspan=1, padx=10, pady=2, sticky="ns")
+
+    # Cancel Button
+    cancel_btn = tk.Button(bottom_controls_frame, text="Cancel", width=5, command=lambda: close_edit_mode())
+    cancel_btn.grid(row=1, column=3, rowspan=1, padx=10, pady=2, sticky="ns")
+
+    show_ambience_options()
+
+def clear_ambience_buttons():
+    for widget in ambience_frame.winfo_children():
+        widget.destroy()
+
+    create_ambience_buttons(ambience_frame)
 
 
 #endregion
