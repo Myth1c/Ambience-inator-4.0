@@ -9,7 +9,7 @@ class MixedAudio():
         self.proc_amb = None
         self.proc_music = None
         self.music_volume = 1.0
-        self.ambience_volume = 0.5
+        self.ambience_volume = 0.25
         self.music_paused = False
         self.ambience_paused = False
 

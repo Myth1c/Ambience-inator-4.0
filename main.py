@@ -520,7 +520,7 @@ def start_gui():
     # Music Volume Slider
     amb_volume = tk.DoubleVar()
     amb_volume_slider = tk.Scale(amb_control, from_=0, to=100, orient="horizontal", length=500, sliderlength=10, width=15, showvalue=False, tickinterval=0, bg = "gray25", variable=amb_volume, command=lambda vol = amb_volume: ambient_volume_changed(vol), border=0)
-    amb_volume_slider.set(50)
+    amb_volume_slider.set(25)
     amb_volume_slider.grid(row=1, column=0, padx=5, columnspan=4)
 
     # Play/Pause Button
