@@ -961,7 +961,7 @@ def create_ambience_buttons(parent):
     col = 0
     row = 1
 
-    btn_width = 5
+    btn_width = 10
     btn_height = 1
 
     # Add the label at the top row 0
@@ -969,7 +969,7 @@ def create_ambience_buttons(parent):
     label.grid(row=0, column=0, columnspan=6, pady=(0, 10))  # span all columns with some bottom padding
     label.config(bg="gray25", fg="white")
 
-    max_per_row = 6
+    max_per_row = 4
 
     for url in ambience:
         btn = tk.Button(
