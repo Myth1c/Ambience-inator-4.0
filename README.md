@@ -10,13 +10,17 @@
 - Prints out a queue for previously played songs, currently playing, and songs left in the playlist in a text channel of your choice
 
 ## Main window
-<img width="502" height="506" alt="Main window of Ambience-inator" src="https://github.com/user-attachments/assets/778063e3-dfca-4fc3-9094-4ce363d50a84" />
+<img width="544" height="1039" alt="Main window of Ambience-inator" src="https://github.com/user-attachments/assets/9a837ff8-b8d8-429f-babd-eec4429cf3b8" />
 
-## Edit Mode Window
-<img width="828" height="652" alt="Edit Mode | Updating/Removing a song from the Combat playlist" src="https://github.com/user-attachments/assets/42733be2-19ab-41f1-aa1c-d7ff95f98380" />
+## Playlist Editing Window
+<img width="828" height="652" alt="Edit Mode | Updating/Removing a song from the Combat playlist" src="https://github.com/user-attachments/assets/86388a48-83d9-4833-9a19-a06a1d376297" />
+
+## Ambience Editing Window
+<img width="828" height="652" alt="Edit Mode for Ambience Selection" src="https://github.com/user-attachments/assets/1b1ea317-8e89-4adf-8328-6e9fa631bdd1" />
 
 ## Discord Queue Message
 <img width="594" height="490" alt="image" src="https://github.com/user-attachments/assets/b5ef8428-08e2-477c-888d-bdc3e10a2d1e" />
+
 
 
 # SETUP
