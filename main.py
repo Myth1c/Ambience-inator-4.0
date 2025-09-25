@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import tkinter as tk
+from tkinter import ttk
 import asyncio
 import discord
 from discord.ext import commands
@@ -12,6 +13,7 @@ import json
 import random
 from functools import partial
 import os
+from audiomixer import MixedAudio, MixedAudioSource
 
 CONFIG_FILE = "./config.json"
 
@@ -23,11 +25,12 @@ if not os.path.exists(CONFIG_FILE):
 with open(CONFIG_FILE, "r") as f:
     config = json.load(f)
 
-# ====== CONFIG ======
+#region ====== CONFIG ======
 TOKEN = config.get("bot_token")
 CHANNEL_ID = config.get("channel_id")
 VOICE_ID = config.get("vchannel_id")
 PLAYLIST_DICTIONARY = "./playlists.json"
+AMBIENCE_DICTIONARY = "./ambience.json"
 
 YDL_OPTS = {
     'format': 'bestaudio[ext=webm][acodec=opus]/bestaudio/best',
@@ -41,9 +44,9 @@ FFMPEG_OPTS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
     'options': '-vn'
 }
-# ====================
+#endregion ====================
 
-# ==== Global Variables ====
+#region ==== Global Variables ====
 
 playlist_Info = {
     "playlist_name": None,
@@ -51,12 +54,19 @@ playlist_Info = {
     "queue": {},
     "playlist_previous" : {},
     "playlist_current" : {},
-    "playlist_next" : {}
+    "playlist_next" : {},
+    "ambience_current" : {}
+}
+
+ambience_Info = {
+    "ambience_name" : None,
+    "current_url" : None
 }
 
 bot_Status = {
     "voice_client": None,
-    "is_playing": False,
+    "is_music_playing": False,
+    "is_ambience_playing": False,
     "queue_message": None,
     "shuffle_mode": True,
     "loop_mode": False,
@@ -76,7 +86,15 @@ edit_Mode = {
     "url_label" : None,
     "url_entry" : None,
     "update_btn" : None,
-    "playlist_dictionary" : {}
+    "playlist_dictionary" : {},
+
+    "edited_ambience_list" : {},
+    "ambiance_dictionary" : {},
+    "selected_ambience" : {},
+    "selected_ambience_btn" : None,
+    "previous_ambience_btn" : None,
+    "add_rmv_ambi_btn" : None,
+    "change_ambi_btn" : None
 }
 
 
@@ -87,7 +105,11 @@ current_selected_button = None
 previous_selected_button = None
 
 playlists_frame = None
-# ==========================
+ambience_frame = None
+
+audioMixer = MixedAudio()
+audioSource = MixedAudioSource(audioMixer)
+#endregion ==========================
 
 
 
@@ -96,14 +118,15 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
 intents.members = True
-bot = discord.Client(intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Global reference to loop for GUI thread
 loop = asyncio.get_event_loop()
 
 # Function to shut down bot
 async def shutdown():
-    bot_Status["is_playing"] = False
+    bot_Status["is_music_playing"] = False
+    bot_Status["is_ambience_playing"] = False
     if bot_Status["queue_message"] is not None:
         await bot_Status["queue_message"].delete()
     await bot.close()
@@ -111,7 +134,7 @@ async def shutdown():
     sys.exit(0)
 
 
-# ==== Helper Functions ====
+#region ==== Helper Functions ====
 
 def load_playlists():
     # Load the given playlist from the JSON file
@@ -174,7 +197,7 @@ async def join_vc(bot: discord.Client, voice_id: int, button: tk.Button = None):
         if bot_Status["voice_client"]:
             await bot_Status["voice_client"].disconnect()
             bot_Status["voice_client"] = None
-            voiceChat_button.config(text = "Join VC", bg = "firebrick1")
+            button.config(text = "Join VC", bg = "firebrick1")
             return
 
         channel = bot.get_channel(voice_id)
@@ -182,7 +205,7 @@ async def join_vc(bot: discord.Client, voice_id: int, button: tk.Button = None):
             bot_Status["voice_client"] = await channel.connect()
     except Exception as e:
         print(f"Error connecting to VC: {e}")
-    voiceChat_button.config(text = "Leave VC", bg = "SpringGreen4")
+    button.config(text = "Leave VC", bg = "SpringGreen4")
 
 async def update_queue_message():
 
@@ -211,29 +234,30 @@ async def update_queue_message():
 
     await bot_Status["queue_message"].edit(content=message)
 
-async def load_next_song():
+def get_direct_url(url):
     
-    if bot_Status["loop_mode"] is True and playlist_Info["playlist_current"]:
-        await play_audio()
-        return
+    with YoutubeDL(YDL_OPTS) as ydl:
+        info = ydl.extract_info(url, download=False)
+        return info["url"]  # Direct media link
 
-    if playlist_Info["playlist_current"]:
-        playlist_Info["playlist_previous"].update(playlist_Info["playlist_current"])
+def load_ambience_dictionary():
+    try:
+        with open(AMBIENCE_DICTIONARY, 'r') as f:
+            return  json.load(f)
+    except FileNotFoundError:
+        # Return empty dictionary if the file does not exist
+        if not os.path.exists(AMBIENCE_DICTIONARY):
+            with open(AMBIENCE_DICTIONARY, "w") as f:
+                json.dump({}, f)
+        return {}
 
-    if playlist_Info["queue"]:
-        first_song_url = next(iter(playlist_Info["queue"]))  # Get the first key (URL)
-        playlist_Info["playlist_current"] = {first_song_url : playlist_Info["queue"][first_song_url]}
-        playlist_Info["queue"].pop(first_song_url)  # Remove the song from the queue
-    else:
-        await rewind_playlist()
-        first_song_url = next(iter(playlist_Info["queue"]))  # Get the first key (URL)
-        playlist_Info["playlist_current"] = {first_song_url : playlist_Info["queue"][first_song_url]}
-        playlist_Info["queue"].pop(first_song_url)  # Remove the song from the queue
+def save_ambience_dictionary(ambience_list : dict = {}):
+    with open(AMBIENCE_DICTIONARY, 'w') as f:
+        json.dump(ambience_list, f, indent=4)
 
-    playlist_Info["playlist_next"] = playlist_Info["queue"]
+#endregion
 
-    await update_queue_message()
-    await play_audio()
+#region ======= MUSIC PLAYBACK =========
 
 async def rewind_playlist():
 
@@ -257,29 +281,6 @@ async def shuffle_playlist():
     # Convert the shuffled list back to a dictionary
     playlist_Info["queue"] = dict(queue_items)
 
-async def play_audio():
-
-    try:
-        if bot_Status["is_playing"]:
-            # Extract audio stream URL using yt_dlp
-            with YoutubeDL(YDL_OPTS) as ydl:
-                info = ydl.extract_info(next(iter(playlist_Info["playlist_current"])), download=False)
-                audio_url = info['url']  # Get the direct audio stream URL
-            
-            # Play the audio using FFmpegPCMAudio
-            bot_Status["voice_client"].play(
-                FFmpegPCMAudio(audio_url, **FFMPEG_OPTS),
-                after=lambda e: asyncio.run_coroutine_threadsafe(load_next_song(), bot.loop)
-            )
-    except Exception as e:
-        print(f"Error playing audio: {e}")
-
-async def skip_current_song():
-    bot_Status["voice_client"].stop()
-    
-    global playback_button
-    playback_button.config(text="Pause Playback", bg = "SpringGreen4")
-
 async def toggle_shuffle(shuffle_btn: tk.Button):
     bot_Status["shuffle_mode"] = not bot_Status["shuffle_mode"]
 
@@ -295,6 +296,76 @@ async def toggle_loop(loop_btn: tk.Button):
         loop_btn.config(bg = "SpringGreen4", fg = "white")
     else:
         loop_btn.config(bg = "firebrick1", fg = "white")
+
+async def check_song_end():
+    while True:
+        # Poll the mixer process
+        if not audioMixer.proc_music or audioMixer.proc_music.poll() is not None:
+            # Song ended, play next
+            await load_next_song()
+            break
+        await asyncio.sleep(1)  # check every second
+
+async def load_next_song():
+    
+    if bot_Status["loop_mode"] is True and playlist_Info["playlist_current"]:
+        audioMixer.start_music(get_direct_url(next(iter(playlist_Info["playlist_current"]))))
+        return
+
+    if playlist_Info["playlist_current"]:
+        playlist_Info["playlist_previous"].update(playlist_Info["playlist_current"])
+
+    if playlist_Info["queue"]:
+        first_song_url = next(iter(playlist_Info["queue"]))  # Get the first key (URL)
+        playlist_Info["playlist_current"] = {first_song_url : playlist_Info["queue"][first_song_url]}
+        playlist_Info["queue"].pop(first_song_url)  # Remove the song from the queue
+    else:
+        await rewind_playlist()
+        first_song_url = next(iter(playlist_Info["queue"]))  # Get the first key (URL)
+        playlist_Info["playlist_current"] = {first_song_url : playlist_Info["queue"][first_song_url]}
+        playlist_Info["queue"].pop(first_song_url)  # Remove the song from the queue
+
+    playlist_Info["playlist_next"] = playlist_Info["queue"]
+    
+    current_url = get_direct_url(next(iter(playlist_Info["playlist_current"])))
+    audioMixer.start_music(current_url)
+
+
+    await update_queue_message()
+    asyncio.get_event_loop().create_task(check_song_end())
+
+async def start_music():
+
+    try:
+        await load_next_song()
+        if playlist_Info["playlist_current"]:
+            if not bot_Status["is_music_playing"]: 
+                bot_Status["voice_client"].play(audioSource)
+                bot_Status["is_music_playing"] = True
+
+    except Exception as e:
+        print(f"Error playing audio: {e}")
+
+async def toggle_playback_music(music_play_btn : tk.Button):
+
+    if not bot_Status["voice_client"]:
+        print("Not currently playing a loaded playlist")
+
+
+    if not audioMixer.music_paused:
+        audioMixer.pause_music()
+        music_play_btn.config(text="Play", bg = "firebrick1")
+    elif audioMixer.music_paused:
+        audioMixer.resume_music()
+        music_play_btn.config(text="Pause", bg = "SpringGreen4")
+
+async def skip_current_song():
+    
+    audioMixer.stop_music()
+    await load_next_song()
+    
+    global playback_button
+    playback_button.config(text="Pause Playback", bg = "SpringGreen4")
 
 async def goto_previous_song():
 
@@ -315,40 +386,63 @@ async def goto_previous_song():
         del playlist_Info["playlist_previous"][last_url]
         playlist_Info["queue"] = {**{last_url : last_title}, **playlist_Info["queue"]}
 
-    bot_Status["voice_client"].stop()
+    audioMixer.stop_music()
+    await load_next_song()
 
     global playback_button
     playback_button.config(text="Pause Playback", bg = "SpringGreen4")
 
-async def toggle_playback(pause_btn: tk.Button):
+def music_volume_changed(vol):
+    vol = float(vol) / 100
 
+    audioMixer.set_music_volume(vol)
+
+#endregion ================================
+
+#region ====== AMBIENCE PLAYBACK =======
+def ambient_volume_changed(vol):
+    vol = float(vol) / 100
+
+    audioMixer.set_ambience_volume(vol)
+
+async def toggle_playback_ambience(btn : tk.Button):
     if not bot_Status["voice_client"]:
         print("Not currently playing a loaded playlist")
 
+    if not audioMixer.ambience_paused:
+        audioMixer.pause_ambience()
+        btn.config(text="Play", bg = "firebrick1")
+    elif audioMixer.ambience_paused:
+        audioMixer.resume_ambience()
+        btn.config(text="Pause", bg = "SpringGreen4")
 
-    if bot_Status["voice_client"].is_playing():
-        bot_Status["voice_client"].pause()
-        pause_btn.config(text="Resume Playback", bg = "firebrick1")
-    elif bot_Status["voice_client"].is_paused():
-        bot_Status["voice_client"].resume()
-        pause_btn.config(text="Pause Playback", bg = "SpringGreen4")
+async def start_ambience():
+
+    try:
+        await load_ambience()
+        if ambience_Info["current_url"]:
+            if not bot_Status["is_ambience_playing"]:
+                bot_Status["voice_client"].play(audioSource)
+                bot_Status["is_ambience_playing"] = True
+    except Exception as e:
+        print(f"Error playing ambience: {e}")
+
+async def load_ambience():
+    audioMixer.start_ambience(get_direct_url(ambience_Info["current_url"]), True)
 
 
+#endregion ================================
 
+#region ===== GUI =====
 
-# ===== GUI =====
 def start_gui():
     global root
     root = tk.Tk()
-    root.title("Ambience-inator 4.0")
-
-    root.grid_rowconfigure(0, weight=0)  # playlist row
-    root.grid_rowconfigure(1, weight=1)  # spacer row (takes up space)
-    root.grid_rowconfigure(2, weight=0)  # controls row
-    root.grid_columnconfigure(0, weight=1)
+    root.title("Ambience-inator 4.1")
+    root.resizable(False, False)
 
     root.config(bg="gray25")
-
+#region Playlist Selection
     # ===== Top Frame for Playlists =====
     playlist_frame = tk.Frame(root)
     playlist_frame.grid(row=0, column=0, sticky="n")  # top & centered
@@ -357,48 +451,108 @@ def start_gui():
     playlists_frame = playlist_frame
 
     create_playlist_buttons(playlist_frame)  # This will grid into the playlist_frame
+#endregion
 
-    # Spacer frame for padding in the middle
-    spacer = tk.Frame(root)
-    spacer.grid(row = 1, column = 0, pady = 40)
-    spacer.config(bg="gray25")
+#region Music Controls
+    # ==== Music controls frame ====
+    music_control = tk.Frame(root)
+    music_control.grid(row = 1, column = 0, pady = 40)
+    music_control.config(bg="gray25")
 
+    music_label = tk.Label(music_control, text="Music Controls", font=("Arial", 14, "bold"))
+    music_label.grid(row=0, column=0, columnspan=5, pady=(0, 10))  # span all columns with some bottom padding
+    music_label.config(bg="gray25", fg="white")
+
+    # Previous Song Button
+    prev_btn = tk.Button(music_control, text="Previous", width=5, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(goto_previous_song(), loop))
+    prev_btn.grid(row = 1, column = 0, padx = 5, pady=2, stick = "ew")
+    
+    # Music Volume Slider
+    music_volume = tk.DoubleVar()
+    volume_slider = tk.Scale(music_control, from_=0, to=100, orient="horizontal", length=50, sliderlength=10, width=15, showvalue=False, tickinterval=0, bg = "gray25", variable=music_volume, command=lambda vol = music_volume: music_volume_changed(vol), border=0)
+    volume_slider.set(100)
+    volume_slider.grid(row=1, column=1, padx=5)
+
+    # Music Progress Bar
+    progress_var = tk.DoubleVar()
+    progress_bar = ttk.Progressbar(music_control, variable=progress_var, maximum=100, length=200)
+    progress_bar.grid(row=1, column=2, padx=10, sticky="ew")
+
+    # Play/Pause Button
+    music_playback_btn = tk.Button(music_control, text="Pause", bg = "SpringGreen4", fg="white", width=5, height = 1, command=lambda: asyncio.run_coroutine_threadsafe(toggle_playback_music(music_playback_btn), loop))
+    music_playback_btn.grid(row = 1, column = 3, padx = 5, pady=2, stick = "ew")
+
+    # Next Song Button
+    skip_btn = tk.Button(music_control, text="Next", width=5, bg = "light steel blue", height = 1, command=lambda: asyncio.run_coroutine_threadsafe(skip_current_song(), loop))
+    skip_btn.grid(row = 1, column = 4, padx = 5, pady=2, stick = "ew")
+
+    # Shuffle Playlist Button
+    shuffle_btn = tk.Button(music_control, text="Shuffle Playlist", width = 10, height = 1, bg="SpringGreen4", fg="white", command = lambda: asyncio.run_coroutine_threadsafe(toggle_shuffle(shuffle_btn), loop))
+    shuffle_btn.grid(row = 2, column = 0, columnspan=2, padx = 5, pady=2, stick = "ew")
+
+    # Loop Song Button
+    loop_btn = tk.Button(music_control, text="Loop Current Song", width = 10, height = 1, bg="firebrick1", fg="white", command = lambda: asyncio.run_coroutine_threadsafe(toggle_loop(loop_btn), loop))
+    loop_btn.grid(row = 2, column = 3, columnspan=2, padx = 5, pady=2, stick = "ew")
+#endregion
+
+#region Ambience Selection
+
+    # ==== Frame for Ambience ====
+    amb_frame = tk.Frame(root)
+    amb_frame.grid(row=2, column=0, stick="n")
+    amb_frame.config(bg="gray25")
+    global ambience_frame
+    ambience_frame = amb_frame
+
+    create_ambience_buttons(amb_frame)
+#endregion
+
+#region Ambience Controls
+    # ==== Ambience controls frame ====
+    amb_control = tk.Frame(root)
+    amb_control.grid(row = 3, column = 0, pady = 40)
+    amb_control.config(bg="gray25")
+
+    amb_label = tk.Label(amb_control, text="Ambience Controls", font=("Arial", 14, "bold"))
+    amb_label.grid(row=0, column=0, columnspan=5, pady=(0, 10))  # span all columns with some bottom padding
+    amb_label.config(bg="gray25", fg="white")
+
+    # Music Volume Slider
+    amb_volume = tk.DoubleVar()
+    amb_volume_slider = tk.Scale(amb_control, from_=0, to=100, orient="horizontal", length=500, sliderlength=10, width=15, showvalue=False, tickinterval=0, bg = "gray25", variable=amb_volume, command=lambda vol = amb_volume: ambient_volume_changed(vol), border=0)
+    amb_volume_slider.set(25)
+    amb_volume_slider.grid(row=1, column=0, padx=5, columnspan=4)
+
+    # Play/Pause Button
+    amb_playback_btn = tk.Button(amb_control, text="Pause", bg = "SpringGreen4", fg="white", width=5, height = 1)
+    amb_playback_btn.grid(row = 2, column = 0, padx = 4, pady=2, stick = "ew", columnspan=5)
+    amb_playback_btn.config(command=lambda: asyncio.run_coroutine_threadsafe(toggle_playback_ambience(amb_playback_btn), loop))
+
+#endregion
+
+#region Bot Controls
     # ===== Bottom Frame for Controls =====
     control_frame = tk.Frame(root)
-    control_frame.grid(row=2, column=0, pady=10)
+    control_frame.grid(row=4, column=0, pady=10)
     control_frame.config(bg="gray25")
-
 
     controls_label = tk.Label(control_frame, text="Bot Controls", font=("Arial", 14, "bold"))
     controls_label.grid(row=0, column=0, columnspan=4, pady=(0, 10))  # span all columns with some bottom padding
     controls_label.config(bg="gray25", fg="white")
 
-    shuffle_btn = tk.Button(control_frame, text="Shuffle Playlist", width = 15, height = 1, bg="SpringGreen4", fg="white", command = lambda: asyncio.run_coroutine_threadsafe(toggle_shuffle(shuffle_btn), loop))
-    shuffle_btn.grid(row = 1, column = 0, padx = 5, pady=2, stick = "ew")
+    editAmb_btn = tk.Button(control_frame, text="Edit Ambience", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(open_ambience_popup(), loop))
+    editAmb_btn.grid(row = 1, column = 0, padx = 5, pady=2, stick = "ew")
 
-    global voiceChat_button
-    voiceChat_button = tk.Button(control_frame, text="Join VC", width=15, height = 1, bg="firebrick1", fg="white", command=lambda: asyncio.run_coroutine_threadsafe(join_vc(bot, VOICE_ID), loop))
+    voiceChat_button = tk.Button(control_frame, text="Join VC", width=15, height = 1, bg="firebrick1", fg="white")
     voiceChat_button.grid(row = 1, column = 1, padx = 5, pady=2, stick = "ew")
+    voiceChat_button.config(command=lambda: asyncio.run_coroutine_threadsafe(join_vc(bot, VOICE_ID, voiceChat_button), loop))
 
-    loop_btn = tk.Button(control_frame, text="Loop Current Song", width = 15, height = 1, bg="firebrick1", fg="white", command = lambda: asyncio.run_coroutine_threadsafe(toggle_loop(loop_btn), loop))
-    loop_btn.grid(row = 1, column = 2, padx = 5, pady=2, stick = "ew")
-
-    prev_btn = tk.Button(control_frame, text="Previous Song", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(goto_previous_song(), loop))
-    prev_btn.grid(row = 2, column = 0, padx = 5, pady=2, stick = "ew")
-    
-    global playback_button
-    playback_button = tk.Button(control_frame, text="Pause Playback", bg = "SpringGreen4", fg="white", width=15, height = 1, command=lambda: asyncio.run_coroutine_threadsafe(toggle_playback(playback_button), loop))
-    playback_button.grid(row = 2, column = 1, padx = 5, pady=2, stick = "ew")
-
-    skip_btn = tk.Button(control_frame, text="Next Song", width=15, bg = "light steel blue", height = 1, command=lambda: asyncio.run_coroutine_threadsafe(skip_current_song(), loop))
-    skip_btn.grid(row = 2, column = 2, padx = 5, pady=2, stick = "ew")
-
-    send_btn = tk.Button(control_frame, text="Edit Mode", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(open_edit_popup(), loop))
-    send_btn.grid(row = 3, column = 0, padx = 5, pady=2, stick = "ew")
+    editMusic_btn = tk.Button(control_frame, text="Edit Playlists", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(open_edit_popup(), loop))
+    editMusic_btn.grid(row = 2, column = 0, padx = 5, pady=2, stick = "ew")
 
     stop_btn = tk.Button(control_frame, text="Shutdown", width=15, height = 1, bg = "light steel blue", command=lambda: asyncio.run_coroutine_threadsafe(shutdown(), loop))
-    stop_btn.grid(row = 3, column = 2, padx = 5, pady=2, stick = "ew")
-
+    stop_btn.grid(row = 2, column = 2, padx = 5, pady=2, stick = "ew")
+#endregion
     root.mainloop()
 
 def create_playlist_buttons(parent):
@@ -451,14 +605,15 @@ def handle_playlist_click(playlist_name, button):
         return
 
 
-    if bot_Status["is_playing"] is False:
-        bot_Status["is_playing"] = True
-        asyncio.run_coroutine_threadsafe(load_next_song(), loop)
+    if bot_Status["is_music_playing"] is False:
+        asyncio.run_coroutine_threadsafe(start_music(), loop)
         print("No song was playing, starting playback!")
 
 
-    elif bot_Status["is_playing"] is True:
-        bot_Status["voice_client"].stop()
+    elif bot_Status["is_music_playing"] is True:
+        audioMixer.stop_music()
+        bot_Status["is_music_playing"] = False
+        asyncio.run_coroutine_threadsafe(start_music(), loop)
         print("A song was playing, loading new playlist!")
 
 
@@ -753,8 +908,6 @@ async def open_edit_popup():
                 continue
             save_playlist(name, edited_Playlist)
 
-            
-
 
     bottom_controls_frame = tk.Frame(popup)
     bottom_controls_frame.grid(row=2, column=0, columnspan=2, pady=10, sticky="ew")
@@ -799,35 +952,270 @@ async def open_edit_popup():
 
 def clear_playlist_buttons():
     for widget in playlists_frame.winfo_children():
-            widget.destroy()
+        widget.destroy()
 
     create_playlist_buttons(playlists_frame)
 
+def create_ambience_buttons(parent):
+    ambience = load_ambience_dictionary()
+    col = 0
+    row = 1
+
+    btn_width = 10
+    btn_height = 1
+
+    # Add the label at the top row 0
+    label = tk.Label(parent, text="Ambience Selection", font=("Arial", 14, "bold"))
+    label.grid(row=0, column=0, columnspan=6, pady=(0, 10))  # span all columns with some bottom padding
+    label.config(bg="gray25", fg="white")
+
+    max_per_row = 4
+
+    for url in ambience:
+        btn = tk.Button(
+            parent,
+            text = ambience[url],
+            width = btn_width,
+            height = btn_height,
+            bg = "light steel blue"
+        )
+        btn.grid(row = row, column = col, padx = 5, pady = 5, sticky = "ew", columnspan=1)
+
+        btn.config(command = partial(handle_ambience_click, url, ambience[url], btn))
+
+        col += 1
+        if col >= max_per_row:
+            col = 0
+            row += 1
+
+def handle_ambience_click(url, name, button):
+    ambience_Info["ambience_name"] = name
+    ambience_Info["current_url"] = url
+
+    if bot_Status["voice_client"] is None:
+        # asyncio.run_coroutine_threadsafe(join_vc(bot, VOICE_ID), loop)
+        print("Wasn't in a VC")
+        return
+
+
+    if bot_Status["is_ambience_playing"] is False:
+        asyncio.run_coroutine_threadsafe(start_ambience(), loop)
+
+
+    elif bot_Status["is_ambience_playing"] is True:
+        audioMixer.stop_ambience()
+        bot_Status["is_ambience_playing"] = False
+        asyncio.run_coroutine_threadsafe(start_ambience(), loop)
+
+async def open_ambience_popup():
+    popup = tk.Toplevel(bg="gray25")
+    popup.title("Edit Ambience Options")
+    popup.geometry("800x600")
+    popup.resizable(False, False)
+    popup.grab_set()
+
+    popup.grid_rowconfigure(0, weight=1)
+    popup.grid_columnconfigure(0, weight=1)
+    popup.grid_columnconfigure(1, weight=1)
+
+    def close_edit_mode():
+        edit_Mode["add_rmv_ambi_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["ambiance_dictionary"] = {}
+        edit_Mode["edited_ambience_list"] = {}
+        edit_Mode["selected_ambience"] = {}
+
+        clear_ambience_buttons()
+        popup.destroy()
+
+    def clear_edited_ambience():
+        for widget in ambi_buttons_frame.winfo_children():
+            widget.destroy()
+    
+    def show_ambience_options():
+
+        clear_edited_ambience()
+        if not edit_Mode["ambiance_dictionary"]:
+            label = tk.Label(ambi_buttons_frame, text="(No ambience added yet)", fg="gray")
+            label.pack(pady=10)
+            return
+        
+        for i, (url, title) in enumerate(edit_Mode["ambiance_dictionary"].items()):
+            text = f"{i}. {title}"
+            btn = tk.Button(ambi_buttons_frame, text=text, anchor="w", padx=5, bg = "light steel blue")
+            btn.config(command=lambda u=url, t=title, b=btn: on_ambi_button_click(u, t, b))
+            btn.pack(fill="x", pady=1)
+
+    def on_ambi_button_click(url, title, btn):
+
+        if edit_Mode["selected_ambience"] == {url : title}:
+            edit_Mode["selected_ambience"] = None
+            title_entry.delete(0, tk.END)
+            url_entry.delete(0, tk.END)
+            edit_Mode["selected_ambience_btn"].config(bg = "light steel blue")
+            edit_Mode["selected_ambience_btn"] = None
+            edit_Mode["previous_ambience_btn"] = None
+            edit_Mode["add_rmv_ambi_btn"].config(text="Add")
+            edit_Mode["change_ambi_btn"].grid_forget()
+            return
+        
+        edit_Mode["selected_ambience"] = {url : title}
+        title_entry.delete(0, tk.END)
+        title_entry.insert(0, title)
+        url_entry.delete(0, tk.END)
+        url_entry.insert(0, url)
+
+
+        edit_Mode["change_ambi_btn"].grid(row=1, column=2, rowspan=1, padx=10, pady=2, sticky="ns")
+
+        if edit_Mode["selected_ambience_btn"]:
+            edit_Mode["previous_ambience_btn"] = edit_Mode["selected_ambience_btn"]
+
+        edit_Mode["selected_ambience_btn"] = btn
+
+        edit_Mode["selected_ambience_btn"].config(bg = "slate blue")
+
+        if edit_Mode["previous_ambience_btn"]:
+            edit_Mode["previous_ambience_btn"].config(bg = "light steel blue")
+
+        edit_Mode["add_rmv_ambi_btn"].config(text="Remove")
+
+    def modify_dictionary():
+
+        newTitle = title_entry.get()
+        newURL = url_entry.get()
+
+        if edit_Mode["selected_ambience"]:
+            edit_Mode["ambiance_dictionary"].pop(next(iter(edit_Mode["selected_ambience"])))
+            edit_Mode["selected_ambience_btn"].config(bg = "light steel blue")
+            edit_Mode["selected_ambience_btn"] = None
+        else:
+            if newTitle == "":
+                # Get the title of the video from the URL
+                with YoutubeDL(YDL_OPTS) as ydl:
+                    info = ydl.extract_info(newURL, download=False)
+                    newTitle = info.get('title', None)
+            edit_Mode["ambiance_dictionary"][newURL] = newTitle
+
+
+        title_entry.delete(0, tk.END)
+        url_entry.delete(0, tk.END)
+
+        edit_Mode["selected_ambience"] = None
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+        edit_Mode["add_rmv_ambi_btn"].config(text="Add")
+
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+
+        show_ambience_options()
+
+    def change_selection():
+
+        if not edit_Mode["selected_ambience"]:
+            return
+        
+        newTitle = title_entry.get()
+        newURL = url_entry.get()
+
+        edit_Mode["ambiance_dictionary"].pop(next(iter(edit_Mode["selected_ambience"])))
+        edit_Mode["ambiance_dictionary"][newURL] = newTitle
 
 
 
+        title_entry.delete(0, tk.END)
+        url_entry.delete(0, tk.END)
+
+        edit_Mode["selected_ambience"] = None
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+        edit_Mode["add_rmv_ambi_btn"].config(text="Add")
+
+        edit_Mode["selected_ambience_btn"] = None
+        edit_Mode["previous_ambience_btn"] = None
+
+        show_ambience_options()
 
 
+    def save_ambience_changes():
+        save_ambience_dictionary(edit_Mode["ambiance_dictionary"])
 
 
+    edit_Mode["ambiance_dictionary"] = load_ambience_dictionary()
+
+    ambi_container = tk.Frame(popup, bd=2, relief="sunken")
+    ambi_container.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
+    
+    
+    ambi_container.grid_rowconfigure(0, weight=1)
+    ambi_container.grid_columnconfigure(0, weight=1)
 
 
+    ambi_canvas = tk.Canvas(ambi_container)
+    ambi_scrollbar = tk.Scrollbar(ambi_container, orient="vertical", command=ambi_canvas.yview)
+    ambi_canvas.config(yscrollcommand=ambi_scrollbar.set)
+
+    ambi_canvas.grid(row=0, column=0, sticky="nsew")
+    ambi_scrollbar.grid(row=0, column=1, sticky="ns")
+
+    ambi_buttons_frame = tk.Frame(ambi_canvas)
+    ambi_canvas.create_window((0, 0), window=ambi_buttons_frame, anchor="nw")
+
+    def on_ambi_frame_configure(event):
+        ambi_canvas.configure(scrollregion=ambi_canvas.bbox("all"))
+
+    ambi_buttons_frame.bind("<Configure>", on_ambi_frame_configure)
+
+    
+
+    bottom_controls_frame = tk.Frame(popup)
+    bottom_controls_frame.grid(row=2, column=0, columnspan=4, pady=10, sticky="ew")
+    bottom_controls_frame.grid_columnconfigure(0, weight=1)
+    bottom_controls_frame.grid_columnconfigure(1, weight=1)
+    bottom_controls_frame.grid_columnconfigure(2, weight=0)
+    bottom_controls_frame.grid_columnconfigure(3, weight=0)
+
+    # Title Entry
+    title_label = tk.Label(bottom_controls_frame, text="Name:")
+    title_label.grid(row=0, column=0, sticky="e", padx=5, pady=2)
+    title_entry = tk.Entry(bottom_controls_frame, width=40)
+    title_entry.grid(row=0, column=1, sticky="ew", padx=5, pady=2)
+
+    # URL Entry
+    url_label = tk.Label(bottom_controls_frame, text="URL:")
+    url_label.grid(row=1, column=0, sticky="e", padx=5, pady=2)
+    url_entry = tk.Entry(bottom_controls_frame, width=40)
+    url_entry.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
+
+    # Update Button
+    update_btn = tk.Button(bottom_controls_frame, text="Add Ambience", width=10, command=lambda: modify_dictionary())
+    update_btn.grid(row=0, column=2, rowspan=1, padx=10, pady=2, sticky="ns")
+    edit_Mode["add_rmv_ambi_btn"] = update_btn
+
+    # Change Button
+    change_btn = tk.Button(bottom_controls_frame, text="Change Info", width=10, command=lambda: change_selection())
+    edit_Mode["change_ambi_btn"] = change_btn
+
+    # Save Button
+    save_btn = tk.Button(bottom_controls_frame, text="Save", width=5, command=lambda: save_ambience_changes())
+    save_btn.grid(row=0, column=3, rowspan=1, padx=10, pady=2, sticky="ns")
+
+    # Cancel Button
+    cancel_btn = tk.Button(bottom_controls_frame, text="Cancel", width=5, command=lambda: close_edit_mode())
+    cancel_btn.grid(row=1, column=3, rowspan=1, padx=10, pady=2, sticky="ns")
+
+    show_ambience_options()
+
+def clear_ambience_buttons():
+    for widget in ambience_frame.winfo_children():
+        widget.destroy()
+
+    create_ambience_buttons(ambience_frame)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#endregion
 
 
 
